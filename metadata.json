@@ -1,0 +1,5 @@
+{
+  "name": "SentinelCore Analytics",
+  "description": "Un panel de análisis térmico profesional para monitorear robots de turbina, visualizar puntos calientes y gestionar configuraciones de telemetría.",
+  "requestFramePermissions": []
+}
