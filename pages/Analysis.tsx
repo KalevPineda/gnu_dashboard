@@ -1,16 +1,18 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { AlertTriangle, FileText, BarChart2, Grid, Box, Cpu, Sparkles, Maximize2 } from 'lucide-react';
-import { AlertRecord, EvolutionPoint, ThermalFrameData } from '../types';
+import { Database, FileText, BarChart2, Grid, Box, Cpu, Sparkles, AlertTriangle, Search } from 'lucide-react';
+import { DataFile, EvolutionPoint, ThermalFrameData } from '../types';
 import { api } from '../services/api';
 import { GoogleGenAI } from "@google/genai";
 
 export const Analysis: React.FC = () => {
-  const [alerts, setAlerts] = useState<AlertRecord[]>([]);
-  const [selectedAlert, setSelectedAlert] = useState<AlertRecord | null>(null);
+  // File State
+  const [files, setFiles] = useState<DataFile[]>([]);
+  const [selectedFile, setSelectedFile] = useState<DataFile | null>(null);
   const [evolutionData, setEvolutionData] = useState<EvolutionPoint[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
   
-  // Matrix State
+  // Matrix View State
   const [viewMode, setViewMode] = useState<'overview' | '2d' | '3d' | 'ai'>('overview');
   const [currentFrameIndex, setCurrentFrameIndex] = useState(0);
   const [matrixData, setMatrixData] = useState<ThermalFrameData | null>(null);
@@ -26,41 +28,44 @@ export const Analysis: React.FC = () => {
   const [loadingList, setLoadingList] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
 
-  // Initial Load
+  // Initial Load: Files instead of Alerts
   useEffect(() => {
-    const fetchAlerts = async () => {
+    const fetchFiles = async () => {
       setLoadingList(true);
       try {
-        const data = await api.getAlerts();
-        setAlerts(data);
-        if (data.length > 0) {
-          handleSelectAlert(data[0]);
+        const data = await api.getFiles();
+        // Filtrar solo capturas relevantes (.npz)
+        const captures = data.filter(f => f.type === 'capture');
+        setFiles(captures);
+        
+        // Seleccionar el primero automáticamente si hay datos
+        if (captures.length > 0) {
+          handleSelectFile(captures[0]);
         }
       } catch (e) {
-        console.error("Error fetching alerts", e);
+        console.error("Error fetching files", e);
       }
       setLoadingList(false);
     };
-    fetchAlerts();
+    fetchFiles();
   }, []);
 
-  // Update Matrix Data when Slider Moves
+  // Update Matrix Data when Slider Moves or File Changes
   useEffect(() => {
-    if (selectedAlert && (viewMode === '2d' || viewMode === '3d' || viewMode === 'ai')) {
+    if (selectedFile && (viewMode === '2d' || viewMode === '3d' || viewMode === 'ai')) {
       const fetchMatrix = async () => {
         setMatrixError(null);
         try {
-          // NOTA: La API Rust actual probablemente falle aquí porque no tiene endpoint /matrix
-          const data = await api.getThermalMatrix(selectedAlert.dataset_path, currentFrameIndex);
+          const data = await api.getThermalMatrix(selectedFile.name, currentFrameIndex);
           setMatrixData(data);
         } catch (e) {
           setMatrixData(null);
-          setMatrixError("El backend actual no soporta la visualización detallada de la matriz (falta endpoint /matrix).");
+          setMatrixError("Vista de matriz no disponible (falta endpoint /matrix en backend).");
         }
       };
       fetchMatrix();
     }
-  }, [currentFrameIndex, viewMode, selectedAlert]);
+  }, [currentFrameIndex, viewMode, selectedFile]);
 
   // Draw 2D Heatmap
   useEffect(() => {
@@ -70,23 +75,16 @@ export const Analysis: React.FC = () => {
         const { width, height, pixels, min_temp, max_temp } = matrixData;
         canvas2DRef.current.width = width;
         canvas2DRef.current.height = height;
-
         const imgData = ctx.createImageData(width, height);
         const data = imgData.data;
         const range = max_temp - min_temp || 1;
-
         for (let i = 0; i < pixels.length; i++) {
             const val = pixels[i];
             const norm = (val - min_temp) / range;
-            let r, g, b;
-            r = Math.min(255, Math.max(0, norm * 255 * 2));
-            g = Math.min(255, Math.max(0, (norm - 0.5) * 255 * 2));
-            b = Math.min(255, Math.max(0, (1 - norm) * 255));
-
             const idx = i * 4;
-            data[idx] = r;     
-            data[idx + 1] = g; 
-            data[idx + 2] = b; 
+            data[idx] = Math.min(255, Math.max(0, norm * 255 * 2));     
+            data[idx + 1] = Math.min(255, Math.max(0, (norm - 0.5) * 255 * 2)); 
+            data[idx + 2] = Math.min(255, Math.max(0, (1 - norm) * 255)); 
             data[idx + 3] = 255; 
         }
         ctx.putImageData(imgData, 0, 0);
@@ -94,64 +92,8 @@ export const Analysis: React.FC = () => {
     }
   }, [matrixData, viewMode]);
 
-  // Draw 3D Wireframe
-  useEffect(() => {
-    if (viewMode === '3d' && matrixData && canvas3DRef.current) {
-      const ctx = canvas3DRef.current.getContext('2d');
-      if (ctx) {
-        const { width, height, pixels, min_temp, max_temp } = matrixData;
-        const w = canvas3DRef.current.width;
-        const h = canvas3DRef.current.height;
-        ctx.clearRect(0, 0, w, h);
-        ctx.strokeStyle = '#f97316';
-        ctx.lineWidth = 1;
-        const range = max_temp - min_temp || 1;
-        const stepX = Math.ceil(width / 32); 
-        const stepY = Math.ceil(height / 24);
-        const spacingX = w / (width / stepX * 1.5);
-        const spacingY = h / (height / stepY * 2);
-        const offsetX = w / 4;
-        const offsetY = h / 3;
-
-        for (let y = 0; y < height; y += stepY) {
-          ctx.beginPath();
-          for (let x = 0; x < width; x += stepX) {
-            const val = pixels[y * width + x];
-            const norm = (val - min_temp) / range;
-            const lift = norm * 60;
-            const visualX = x / stepX;
-            const visualY = y / stepY;
-            const isoX = offsetX + (visualX - visualY) * spacingX + (w/3);
-            const isoY = offsetY + (visualX + visualY) * (spacingY * 0.5) - lift;
-
-            if (x === 0) ctx.moveTo(isoX, isoY);
-            else ctx.lineTo(isoX, isoY);
-          }
-          ctx.stroke();
-        }
-        
-        for (let x = 0; x < width; x += stepX) {
-           ctx.beginPath();
-           for (let y = 0; y < height; y += stepY) {
-             const val = pixels[y * width + x];
-             const norm = (val - min_temp) / range;
-             const lift = norm * 60;
-             const visualX = x / stepX;
-             const visualY = y / stepY;
-             const isoX = offsetX + (visualX - visualY) * spacingX + (w/3);
-             const isoY = offsetY + (visualX + visualY) * (spacingY * 0.5) - lift;
-             
-             if (y === 0) ctx.moveTo(isoX, isoY);
-             else ctx.lineTo(isoX, isoY);
-           }
-           ctx.stroke();
-        }
-      }
-    }
-  }, [matrixData, viewMode]);
-
-  const handleSelectAlert = async (alert: AlertRecord) => {
-    setSelectedAlert(alert);
+  const handleSelectFile = async (file: DataFile) => {
+    setSelectedFile(file);
     setViewMode('overview');
     setAiAnalysis("");
     setCurrentFrameIndex(0);
@@ -159,7 +101,8 @@ export const Analysis: React.FC = () => {
     setMatrixData(null);
     setMatrixError(null);
     try {
-      const data = await api.getEvolutionData(alert.dataset_path);
+      // Obtenemos la evolución real del archivo seleccionado
+      const data = await api.getEvolutionData(file.name);
       setEvolutionData(data);
     } catch(e) {
       console.error(e);
@@ -169,16 +112,23 @@ export const Analysis: React.FC = () => {
   };
 
   const runGeminiAnalysis = async () => {
-    if (!process.env.API_KEY) {
-        setAiAnalysis("Error: API Key no configurada.");
+    if (!process.env.API_KEY || !selectedFile) {
+        setAiAnalysis("Error: API Key no configurada o archivo no seleccionado.");
         return;
     }
     
-    // Si no tenemos datos de matriz, usamos los metadatos de la alerta
-    const hasMatrix = !!matrixData;
-    const promptContext = hasMatrix 
-      ? `Temperatura Máxima: ${matrixData!.max_temp.toFixed(1)}°C, Diferencial: ${(matrixData!.max_temp - matrixData!.min_temp).toFixed(1)}°C`
-      : `Temperatura Máxima Registrada: ${selectedAlert?.max_temp.toFixed(1)}°C (Datos detallados de matriz no disponibles)`;
+    // Calcular estadísticas básicas del archivo actual usando evolutionData
+    const maxTemp = evolutionData.reduce((acc, curr) => Math.max(acc, curr.max_temp), 0);
+    const avgTemp = evolutionData.length > 0 
+        ? evolutionData.reduce((acc, curr) => acc + curr.avg_temp, 0) / evolutionData.length 
+        : 0;
+
+    const promptContext = `
+      Archivo: ${selectedFile.name}
+      Temperatura Máxima en Dataset: ${maxTemp.toFixed(1)}°C
+      Temperatura Promedio: ${avgTemp.toFixed(1)}°C
+      Fecha Captura: ${selectedFile.date}
+    `;
 
     setIsAnalyzing(true);
     setAiAnalysis("");
@@ -187,12 +137,12 @@ export const Analysis: React.FC = () => {
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const model = ai.models.generateContent;
         
-        const prompt = `Actúa como un ingeniero experto en análisis térmico industrial. Analiza el siguiente incidente de turbina:
-        - ${promptContext}
-        - ID Turbina: ${selectedAlert?.turbine_token}
-        - Ángulo: ${selectedAlert?.angle}°
+        const prompt = `Actúa como un ingeniero experto en análisis térmico.
+        Analiza los siguientes datos de una captura térmica de turbina:
+        ${promptContext}
         
-        Provee un diagnóstico breve (máx 3 líneas) sobre la posible causa del sobrecalentamiento y recomendación inmediata.`;
+        Si la temperatura supera los 50°C, considéralo una anomalía potencial.
+        Provee un resumen técnico, indicando si los valores son nominales o críticos, y sugiere acciones.`;
 
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
@@ -209,43 +159,64 @@ export const Analysis: React.FC = () => {
     }
   };
 
+  // Helper para extraer "token" del nombre del archivo (e.g. capture_TURBINE123_170000.npz)
+  const getTurbineToken = (filename: string) => {
+      const parts = filename.split('_');
+      if (parts.length >= 2) return parts[1];
+      return "Desconocido";
+  };
+
+  const filteredFiles = files.filter(f => f.name.toLowerCase().includes(searchTerm.toLowerCase()));
+
   return (
     <div className="space-y-6 h-[calc(100vh-140px)] flex flex-col">
       <div className="flex justify-between items-center">
         <div>
-           <h1 className="text-2xl font-bold text-white">Análisis Térmico Avanzado</h1>
-           <p className="text-slate-400 text-sm mt-1">Revisión de anomalías e insights de IA</p>
+           <h1 className="text-2xl font-bold text-white">Análisis de Capturas</h1>
+           <p className="text-slate-400 text-sm mt-1">Exploración profunda de archivos almacenados en la nube</p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 min-h-0">
         
-        {/* Left: Alert List */}
+        {/* Left: Files List */}
         <div className="lg:col-span-3 bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden">
-          <div className="p-4 border-b border-slate-800 bg-slate-800/30">
+          <div className="p-4 border-b border-slate-800 bg-slate-800/30 space-y-3">
             <h2 className="font-semibold text-slate-200 flex items-center text-sm">
-              <AlertTriangle className="w-4 h-4 mr-2 text-orange-500" />
-              Incidentes Recientes
+              <Database className="w-4 h-4 mr-2 text-orange-500" />
+              Capturas Disponibles
             </h2>
+            <div className="relative">
+                <Search className="absolute left-2 top-2 w-3 h-3 text-slate-500" />
+                <input 
+                    type="text" 
+                    placeholder="Filtrar..." 
+                    className="w-full bg-slate-950 border border-slate-700 rounded py-1 pl-7 pr-2 text-xs text-white focus:outline-none focus:border-orange-500"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                />
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto">
             {loadingList ? (
-              <div className="p-4 text-center text-slate-500 text-xs">Cargando alertas...</div>
-            ) : alerts.length === 0 ? (
-              <div className="p-4 text-center text-slate-500 text-xs">No hay alertas registradas</div>
+              <div className="p-4 text-center text-slate-500 text-xs">Cargando archivos...</div>
+            ) : filteredFiles.length === 0 ? (
+              <div className="p-4 text-center text-slate-500 text-xs">No hay capturas disponibles</div>
             ) : (
               <ul className="divide-y divide-slate-800">
-                {alerts.map((alert) => (
+                {filteredFiles.map((file) => (
                   <li 
-                    key={alert.id}
-                    onClick={() => handleSelectAlert(alert)}
-                    className={`p-3 cursor-pointer hover:bg-slate-800 transition-colors ${selectedAlert?.id === alert.id ? 'bg-slate-800/60 border-l-2 border-orange-500' : 'border-l-2 border-transparent'}`}
+                    key={file.name}
+                    onClick={() => handleSelectFile(file)}
+                    className={`p-3 cursor-pointer hover:bg-slate-800 transition-colors ${selectedFile?.name === file.name ? 'bg-slate-800/60 border-l-2 border-orange-500' : 'border-l-2 border-transparent'}`}
                   >
                     <div className="flex justify-between items-start mb-1">
-                      <span className="text-[10px] font-mono text-slate-400">{new Date(alert.timestamp * 1000).toLocaleDateString()}</span>
-                      <span className="text-xs font-bold text-red-400">{alert.max_temp.toFixed(1)}°C</span>
+                      <span className="text-[10px] font-mono text-slate-400">{file.date.split(' ')[0]}</span>
+                      <span className="text-[10px] text-slate-500">{file.size_kb} KB</span>
                     </div>
-                    <p className="text-xs font-medium text-slate-200 mb-1 truncate">{alert.turbine_token}</p>
+                    <p className="text-xs font-medium text-slate-200 mb-1 truncate" title={file.name}>
+                        {file.name}
+                    </p>
                   </li>
                 ))}
               </ul>
@@ -255,7 +226,7 @@ export const Analysis: React.FC = () => {
 
         {/* Center: Visualization */}
         <div className="lg:col-span-6 flex flex-col space-y-4">
-           {selectedAlert ? (
+           {selectedFile ? (
              <div className="bg-slate-900 border border-slate-800 rounded-xl flex flex-col h-full overflow-hidden relative">
                 
                 {/* Toolbar */}
@@ -291,22 +262,29 @@ export const Analysis: React.FC = () => {
                     {/* View: Overview */}
                     {viewMode === 'overview' && (
                         <div className="w-full h-full">
-                           <h4 className="text-xs font-mono text-slate-500 absolute top-2 right-2">Resumen de Archivo</h4>
-                           <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart data={evolutionData}>
-                              <defs>
-                                <linearGradient id="colorMax" x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3}/>
-                                  <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
-                                </linearGradient>
-                              </defs>
-                              <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                              <XAxis dataKey="frame_index" stroke="#94a3b8" />
-                              <YAxis stroke="#94a3b8" unit="°C" domain={['auto', 'auto']} />
-                              <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155' }} />
-                              <Area type="monotone" dataKey="max_temp" stroke="#ef4444" fill="url(#colorMax)" strokeWidth={2} />
-                            </AreaChart>
-                          </ResponsiveContainer>
+                           <h4 className="text-xs font-mono text-slate-500 absolute top-2 right-2">Evolución Térmica del Dataset</h4>
+                           {evolutionData.length > 0 ? (
+                               <ResponsiveContainer width="100%" height="100%">
+                                <AreaChart data={evolutionData}>
+                                <defs>
+                                    <linearGradient id="colorMax" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3}/>
+                                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                                <XAxis dataKey="frame_index" stroke="#94a3b8" />
+                                <YAxis stroke="#94a3b8" unit="°C" domain={['auto', 'auto']} />
+                                <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155' }} />
+                                <Area type="monotone" dataKey="max_temp" stroke="#ef4444" fill="url(#colorMax)" strokeWidth={2} />
+                                </AreaChart>
+                            </ResponsiveContainer>
+                           ) : (
+                               <div className="flex items-center justify-center h-full text-slate-500">
+                                   {loadingData ? "Cargando datos..." : "No hay datos de evolución disponibles"}
+                               </div>
+                           )}
+                           
                         </div>
                     )}
 
@@ -338,10 +316,10 @@ export const Analysis: React.FC = () => {
                             
                             <div className="mb-6 space-y-2">
                                 <div className="flex justify-between text-sm text-slate-300 border-b border-slate-700 pb-1">
-                                    <span>Pico Térmico:</span> <span className="font-mono text-red-400">{selectedAlert.max_temp.toFixed(1)} °C</span>
+                                    <span>Archivo:</span> <span className="font-mono text-orange-400 truncate max-w-[150px]">{selectedFile.name}</span>
                                 </div>
                                 <div className="flex justify-between text-sm text-slate-300 border-b border-slate-700 pb-1">
-                                    <span>Archivo:</span> <span className="font-mono text-orange-400 truncate max-w-[150px]">{selectedAlert.dataset_path}</span>
+                                    <span>Fecha:</span> <span className="font-mono text-slate-400">{selectedFile.date}</span>
                                 </div>
                             </div>
 
@@ -351,11 +329,11 @@ export const Analysis: React.FC = () => {
                                 className="w-full py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white rounded-lg font-medium transition-colors flex justify-center items-center"
                             >
                                 {isAnalyzing ? <div className="animate-spin h-4 w-4 border-2 border-white rounded-full border-t-transparent mr-2"></div> : <Sparkles className="w-4 h-4 mr-2" />}
-                                {isAnalyzing ? 'Analizando...' : 'Analizar Incidente'}
+                                {isAnalyzing ? 'Analizando...' : 'Analizar Captura'}
                             </button>
 
                             {aiAnalysis && (
-                                <div className="mt-4 p-3 bg-slate-900 rounded border border-slate-700 text-sm text-slate-300 leading-relaxed animate-in fade-in">
+                                <div className="mt-4 p-3 bg-slate-900 rounded border border-slate-700 text-sm text-slate-300 leading-relaxed animate-in fade-in max-h-64 overflow-y-auto">
                                     {aiAnalysis}
                                 </div>
                             )}
@@ -365,38 +343,49 @@ export const Analysis: React.FC = () => {
              </div>
            ) : (
              <div className="h-full bg-slate-900 border border-slate-800 rounded-xl flex items-center justify-center text-slate-500">
-               Seleccione una alerta para comenzar
+               Seleccione un archivo del panel izquierdo
              </div>
            )}
         </div>
 
         {/* Right: Metadata */}
         <div className="lg:col-span-3 space-y-4">
-           {selectedAlert && (
+           {selectedFile && (
                <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
                  <h3 className="text-sm font-bold text-slate-300 mb-4 flex items-center uppercase tracking-wide">
                    <FileText className="w-4 h-4 mr-2" />
-                   Metadatos
+                   Metadatos del Archivo
                  </h3>
                  <div className="space-y-3">
                     <div className="flex justify-between">
-                        <span className="text-sm text-slate-500">ID</span>
-                        <span className="text-sm text-slate-300 font-mono truncate max-w-[120px]" title={selectedAlert.id}>{selectedAlert.id}</span>
+                        <span className="text-sm text-slate-500">Token Turbina</span>
+                        <span className="text-sm text-slate-300 font-mono truncate max-w-[120px]">{getTurbineToken(selectedFile.name)}</span>
                     </div>
                     <div className="flex justify-between">
-                        <span className="text-sm text-slate-500">Dataset</span>
-                        <span className="text-sm text-slate-300 font-mono truncate max-w-[120px]" title={selectedAlert.dataset_path}>{selectedAlert.dataset_path}</span>
+                        <span className="text-sm text-slate-500">Nombre</span>
+                        <span className="text-sm text-slate-300 font-mono truncate max-w-[120px]" title={selectedFile.name}>{selectedFile.name}</span>
                     </div>
                     <div className="flex justify-between">
-                        <span className="text-sm text-slate-500">Ángulo</span>
-                        <span className="text-sm text-slate-300">{selectedAlert.angle.toFixed(1)}°</span>
+                        <span className="text-sm text-slate-500">Tamaño</span>
+                        <span className="text-sm text-slate-300">{selectedFile.size_kb} KB</span>
                     </div>
-                    <div className="pt-3 border-t border-slate-800">
-                        <div className="text-xs text-slate-500 mb-1">Severidad</div>
-                        <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-                            <div className="h-full bg-gradient-to-r from-green-500 to-red-500" style={{ width: `${Math.min(100, (selectedAlert.max_temp / 100) * 100)}%` }}></div>
+                    
+                    {evolutionData.length > 0 && (
+                        <div className="pt-3 border-t border-slate-800 mt-2">
+                            <div className="flex justify-between mb-1">
+                                <span className="text-xs text-slate-500">Temp. Máxima Detectada</span>
+                                <span className="text-xs text-red-400 font-bold">
+                                    {Math.max(...evolutionData.map(d => d.max_temp)).toFixed(1)}°C
+                                </span>
+                            </div>
+                            <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                                <div 
+                                    className="h-full bg-gradient-to-r from-green-500 to-red-500" 
+                                    style={{ width: `${Math.min(100, (Math.max(...evolutionData.map(d => d.max_temp)) / 100) * 100)}%` }}
+                                ></div>
+                            </div>
                         </div>
-                    </div>
+                    )}
                  </div>
                </div>
            )}

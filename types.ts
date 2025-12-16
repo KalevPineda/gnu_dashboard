@@ -3,8 +3,8 @@ export interface RemoteConfig {
     max_temp_trigger: number;
     scan_wait_time_sec: number;
     system_enabled: boolean;
-    pan_step_degrees: number; // Nuevo campo en el backend Rust
-    alert_email?: string; // Opcional o eliminado en el backend Rust provisto, lo dejo opcional para evitar errores de compilación si se usaba
+    pan_step_degrees: number; 
+    alert_email?: string; 
   }
   
   // Matches Rust 'LiveStatus'
@@ -39,12 +39,12 @@ export interface RemoteConfig {
     frame_index: number;
     width: number;
     height: number;
-    pixels: number[]; // Flattened array or 2D array depending on API, assuming flattened for ease
+    pixels: number[];
     min_temp: number;
     max_temp: number;
   }
 
-  // New: For File Management
+  // Matches Rust 'FileEntry'
   export interface DataFile {
     name: string;
     size_kb: number;

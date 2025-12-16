@@ -54,9 +54,19 @@ export const api = {
 
   /**
    * Obtiene la lista de archivos directamente del sistema de archivos del servidor.
-   * Requiere que el backend implemente la ruta GET /api/files.
+   * Usa el endpoint GET /api/files implementado en el backend.
    */
   getFiles: async (): Promise<DataFile[]> => {
      return await request<DataFile[]>('/files');
+  },
+  
+  /**
+   * Helper para construir la URL de descarga directa
+   */
+  getDownloadUrl: (filename: string): string => {
+    // Si API_BASE_URL es "/api", queremos "/files/archivo.npz"
+    // Si API_BASE_URL es "http://host:8080/api", queremos "http://host:8080/files/archivo.npz"
+    const baseUrl = API_BASE_URL.replace(/\/api$/, '');
+    return `${baseUrl}/files/${filename}`;
   }
 };
