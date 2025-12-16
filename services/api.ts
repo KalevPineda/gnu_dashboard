@@ -47,9 +47,12 @@ export const api = {
   
   getEvolutionData: (filename: string) => request<EvolutionPoint[]>(`/evolution/${filename}`),
 
-  getThermalMatrix: async (datasetId: string, frameIndex: number): Promise<ThermalFrameData> => {
-    console.warn("La API actual no soporta streaming de matriz térmica (falta endpoint /matrix o /pixels).");
-    throw new Error("Matrix Data Not Available in Backend");
+  /**
+   * Obtiene la matriz térmica (píxeles) de un frame específico.
+   * Requiere endpoint backend: GET /api/matrix/:filename/:frameIndex
+   */
+  getThermalMatrix: async (filename: string, frameIndex: number): Promise<ThermalFrameData> => {
+    return request<ThermalFrameData>(`/matrix/${filename}/${frameIndex}`);
   },
 
   /**
@@ -61,12 +64,10 @@ export const api = {
   },
   
   /**
-   * Helper para construir la URL de descarga directa
+   * Helper para construir la URL de descarga directa.
+   * Usa el endpoint GET /api/download/:filename para evitar problemas de Mixed Content.
    */
   getDownloadUrl: (filename: string): string => {
-    // Si API_BASE_URL es "/api", queremos "/files/archivo.npz"
-    // Si API_BASE_URL es "http://host:8080/api", queremos "http://host:8080/files/archivo.npz"
-    const baseUrl = API_BASE_URL.replace(/\/api$/, '');
-    return `${baseUrl}/files/${filename}`;
+    return `${API_BASE_URL}/download/${filename}`;
   }
 };

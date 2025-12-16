@@ -5,6 +5,7 @@ export interface RemoteConfig {
     system_enabled: boolean;
     pan_step_degrees: number; 
     alert_email?: string; 
+    gemini_api_key?: string; // New: API Key stored in backend
   }
   
   // Matches Rust 'LiveStatus'

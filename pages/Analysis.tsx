@@ -4,6 +4,7 @@ import { Database, FileText, BarChart2, Grid, Box, Cpu, Sparkles, AlertTriangle,
 import { DataFile, EvolutionPoint, ThermalFrameData } from '../types';
 import { api } from '../services/api';
 import { GoogleGenAI } from "@google/genai";
+import { Link } from 'react-router-dom';
 
 export const Analysis: React.FC = () => {
   // File State
@@ -23,31 +24,36 @@ export const Analysis: React.FC = () => {
   // Gemini State
   const [aiAnalysis, setAiAnalysis] = useState<string>("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [apiKey, setApiKey] = useState<string | null>(null);
 
   // Loading States
   const [loadingList, setLoadingList] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
 
-  // Initial Load: Files instead of Alerts
+  // Initial Load: Files instead of Alerts & Config for API Key
   useEffect(() => {
-    const fetchFiles = async () => {
+    const initData = async () => {
       setLoadingList(true);
       try {
-        const data = await api.getFiles();
-        // Filtrar solo capturas relevantes (.npz)
-        const captures = data.filter(f => f.type === 'capture');
+        // 1. Fetch Files
+        const filesData = await api.getFiles();
+        const captures = filesData.filter(f => f.type === 'capture');
         setFiles(captures);
-        
-        // Seleccionar el primero automáticamente si hay datos
         if (captures.length > 0) {
           handleSelectFile(captures[0]);
         }
+
+        // 2. Fetch Config for Gemini Key
+        const configData = await api.getConfig();
+        if (configData.gemini_api_key) {
+          setApiKey(configData.gemini_api_key);
+        }
       } catch (e) {
-        console.error("Error fetching files", e);
+        console.error("Error fetching init data", e);
       }
       setLoadingList(false);
     };
-    fetchFiles();
+    initData();
   }, []);
 
   // Update Matrix Data when Slider Moves or File Changes
@@ -60,7 +66,7 @@ export const Analysis: React.FC = () => {
           setMatrixData(data);
         } catch (e) {
           setMatrixData(null);
-          setMatrixError("Vista de matriz no disponible (falta endpoint /matrix en backend).");
+          setMatrixError("Error cargando matriz térmica. Verifica que el backend tenga el endpoint /matrix implementado.");
         }
       };
       fetchMatrix();
@@ -82,6 +88,7 @@ export const Analysis: React.FC = () => {
             const val = pixels[i];
             const norm = (val - min_temp) / range;
             const idx = i * 4;
+            // Simple thermal map: Blue -> Red
             data[idx] = Math.min(255, Math.max(0, norm * 255 * 2));     
             data[idx + 1] = Math.min(255, Math.max(0, (norm - 0.5) * 255 * 2)); 
             data[idx + 2] = Math.min(255, Math.max(0, (1 - norm) * 255)); 
@@ -112,8 +119,8 @@ export const Analysis: React.FC = () => {
   };
 
   const runGeminiAnalysis = async () => {
-    if (!process.env.API_KEY || !selectedFile) {
-        setAiAnalysis("Error: API Key no configurada o archivo no seleccionado.");
+    if (!apiKey || !selectedFile) {
+        setAiAnalysis("Error: API Key no configurada.");
         return;
     }
     
@@ -134,8 +141,7 @@ export const Analysis: React.FC = () => {
     setAiAnalysis("");
 
     try {
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const model = ai.models.generateContent;
+        const ai = new GoogleGenAI({ apiKey: apiKey });
         
         const prompt = `Actúa como un ingeniero experto en análisis térmico.
         Analiza los siguientes datos de una captura térmica de turbina:
@@ -153,13 +159,13 @@ export const Analysis: React.FC = () => {
 
     } catch (error) {
         console.error(error);
-        setAiAnalysis("Error conectando con Gemini AI Service.");
+        setAiAnalysis("Error conectando con Gemini AI Service. Verifica tu cuota o la API Key en Configuración.");
     } finally {
         setIsAnalyzing(false);
     }
   };
 
-  // Helper para extraer "token" del nombre del archivo (e.g. capture_TURBINE123_170000.npz)
+  // Helper para extraer "token" del nombre del archivo
   const getTurbineToken = (filename: string) => {
       const parts = filename.split('_');
       if (parts.length >= 2) return parts[1];
@@ -238,7 +244,7 @@ export const Analysis: React.FC = () => {
                     <button onClick={() => setViewMode('2d')} className={`p-2 rounded hover:bg-slate-700 ${viewMode === '2d' ? 'bg-slate-700 text-blue-400' : 'text-slate-400'}`} title="Matriz 2D">
                         <Grid className="w-5 h-5" />
                     </button>
-                    <button onClick={() => setViewMode('3d')} className={`p-2 rounded hover:bg-slate-700 ${viewMode === '3d' ? 'bg-slate-700 text-purple-400' : 'text-slate-400'}`} title="Superficie 3D">
+                    <button onClick={() => setViewMode('3d')} className={`p-2 rounded hover:bg-slate-700 ${viewMode === '3d' ? 'bg-slate-700 text-purple-400' : 'text-slate-400'}`} title="Superficie 3D (WIP)">
                         <Box className="w-5 h-5" />
                     </button>
                     <div className="h-6 w-px bg-slate-700 mx-2"></div>
@@ -290,19 +296,35 @@ export const Analysis: React.FC = () => {
 
                     {/* View: 2D Matrix */}
                     {viewMode === '2d' && !matrixError && matrixData && (
-                        <div className="flex flex-col items-center w-full h-full justify-center">
+                        <div className="flex flex-col items-center w-full h-full justify-center space-y-4">
                             <canvas 
                                 ref={canvas2DRef} 
-                                className="border border-slate-700 bg-black rounded shadow-2xl image-pixelated max-w-full max-h-full"
+                                className="border border-slate-700 bg-black rounded shadow-2xl image-pixelated max-w-full max-h-[80%]"
                                 style={{ aspectRatio: matrixData ? `${matrixData.width}/${matrixData.height}` : '4/3' }}
                             ></canvas>
+                            <div className="w-full max-w-xs">
+                                <label className="text-xs text-slate-400 flex justify-between">
+                                  <span>Frame: {currentFrameIndex}</span>
+                                  <span>Max: {matrixData.max_temp.toFixed(1)}°C</span>
+                                </label>
+                                <input 
+                                  type="range" 
+                                  min="0" 
+                                  max={evolutionData.length > 0 ? evolutionData.length - 1 : 0} 
+                                  value={currentFrameIndex}
+                                  onChange={(e) => setCurrentFrameIndex(parseInt(e.target.value))}
+                                  className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer mt-2"
+                                />
+                            </div>
                         </div>
                     )}
 
                     {/* View: 3D Matrix */}
-                    {viewMode === '3d' && !matrixError && matrixData && (
-                         <div className="flex flex-col items-center">
-                             <canvas ref={canvas3DRef} width={400} height={300} className="border border-slate-700 bg-slate-900 rounded shadow-2xl"></canvas>
+                    {viewMode === '3d' && (
+                         <div className="flex flex-col items-center justify-center h-full text-slate-500">
+                             <Box className="w-12 h-12 mb-2 opacity-50" />
+                             <p>Visualización 3D en construcción</p>
+                             <p className="text-xs mt-2">Implementar WebGL/Three.js usando datos de /api/matrix</p>
                          </div>
                     )}
 
@@ -323,10 +345,19 @@ export const Analysis: React.FC = () => {
                                 </div>
                             </div>
 
+                            {!apiKey && (
+                                <div className="mb-4 p-3 bg-yellow-900/30 border border-yellow-700 rounded text-xs text-yellow-200 flex items-start">
+                                    <AlertTriangle className="w-4 h-4 mr-2 flex-shrink-0" />
+                                    <div>
+                                        API Key no configurada. Por favor ve a <Link to="/settings" className="underline hover:text-white">Configuración</Link> para añadir tu Gemini API Key.
+                                    </div>
+                                </div>
+                            )}
+
                             <button 
                                 onClick={runGeminiAnalysis}
-                                disabled={isAnalyzing}
-                                className="w-full py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white rounded-lg font-medium transition-colors flex justify-center items-center"
+                                disabled={isAnalyzing || !apiKey}
+                                className="w-full py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors flex justify-center items-center"
                             >
                                 {isAnalyzing ? <div className="animate-spin h-4 w-4 border-2 border-white rounded-full border-t-transparent mr-2"></div> : <Sparkles className="w-4 h-4 mr-2" />}
                                 {isAnalyzing ? 'Analizando...' : 'Analizar Captura'}
