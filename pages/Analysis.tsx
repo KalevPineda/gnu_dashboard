@@ -16,169 +16,153 @@ const Thermal3DViewer: React.FC<{ data: ThermalFrameData }> = ({ data }) => {
   useEffect(() => {
     if (!mountRef.current || !data) return;
 
-    // 1. Setup Scene
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color('#0f172a'); // Slate 950 matches UI
+    let renderer: THREE.WebGLRenderer | undefined;
+    let scene: THREE.Scene | undefined;
+    let camera: THREE.PerspectiveCamera | undefined;
+    let controls: OrbitControls | undefined;
+    let animationId: number;
 
-    // 2. Camera
-    const camera = new THREE.PerspectiveCamera(45, mountRef.current.clientWidth / mountRef.current.clientHeight, 0.1, 1000);
-    camera.position.set(0, -data.height * 1.5, data.width); // Angled view
-    camera.up.set(0, 0, 1); // Z is up
+    try {
+        // 1. Setup Scene
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color('#0f172a'); // Slate 950 matches UI
 
-    // 3. Renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight);
-    mountRef.current.innerHTML = '';
-    mountRef.current.appendChild(renderer.domElement);
+        // 2. Camera
+        camera = new THREE.PerspectiveCamera(45, mountRef.current.clientWidth / mountRef.current.clientHeight, 0.1, 1000);
+        camera.position.set(0, -data.height * 1.5, data.width); // Angled view
+        camera.up.set(0, 0, 1); // Z is up
 
-    // 4. Controls
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.screenSpacePanning = false;
-    controls.maxPolarAngle = Math.PI / 2;
+        // 3. Renderer
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight);
+        mountRef.current.innerHTML = '';
+        mountRef.current.appendChild(renderer.domElement);
 
-    // 5. Geometry (Terrain)
-    // PlaneGeometry segments must be (width-1) to result in (width) vertices
-    const geometry = new THREE.PlaneGeometry(data.width, data.height, data.width - 1, data.height - 1);
-    const count = geometry.attributes.position.count;
-    
-    // Arrays for Z positions and Colors
-    const colors = [];
-    const colorObj = new THREE.Color();
-    const range = (data.max_temp - data.min_temp) || 1;
-    const Z_SCALE = 0.5; // Escala de exageración de altura
+        // 4. Controls
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.screenSpacePanning = false;
+        controls.maxPolarAngle = Math.PI / 2;
 
-    for (let i = 0; i < count; i++) {
-        const temp = data.pixels[i];
+        // 5. Geometry (Terrain)
+        const geometry = new THREE.PlaneGeometry(data.width, data.height, data.width - 1, data.height - 1);
+        const count = geometry.attributes.position.count;
         
-        // Z Height calculation
-        const normalizedH = (temp - data.min_temp) / range;
-        const z = normalizedH * 10 * Z_SCALE;
-        geometry.attributes.position.setZ(i, z);
+        // Arrays for Z positions and Colors
+        const colors = [];
+        const colorObj = new THREE.Color();
+        const range = (data.max_temp - data.min_temp) || 1;
+        const Z_SCALE = 0.5;
 
-        // Color Calculation (Blue -> Red gradient)
-        // 0.0 (Blue) -> 0.33 (Cyan) -> 0.66 (Yellow) -> 1.0 (Red) implementation simplified:
-        const hue = (1.0 - normalizedH) * 240 / 360; // 240 is blue, 0 is red in HSL
-        colorObj.setHSL(hue, 1.0, 0.5);
-        colors.push(colorObj.r, colorObj.g, colorObj.b);
+        for (let i = 0; i < count; i++) {
+            const temp = data.pixels[i];
+            
+            // Z Height
+            const normalizedH = (temp - data.min_temp) / range;
+            const z = normalizedH * 10 * Z_SCALE;
+            geometry.attributes.position.setZ(i, z);
+
+            // Color (Blue -> Red)
+            const hue = (1.0 - normalizedH) * 240 / 360; 
+            colorObj.setHSL(hue, 1.0, 0.5);
+            colors.push(colorObj.r, colorObj.g, colorObj.b);
+        }
+
+        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+        geometry.computeVertexNormals();
+
+        const material = new THREE.MeshStandardMaterial({ 
+            vertexColors: true, 
+            roughness: 0.5,
+            metalness: 0.1,
+            side: THREE.DoubleSide
+        });
+
+        const mesh = new THREE.Mesh(geometry, material);
+        scene.add(mesh);
+
+        // 6. Max Temp Plane
+        const maxZ = 10 * Z_SCALE;
+        const planeGeo = new THREE.PlaneGeometry(data.width, data.height);
+        const planeMat = new THREE.MeshBasicMaterial({ 
+            color: 0xff0000, 
+            transparent: true, 
+            opacity: 0.1, 
+            side: THREE.DoubleSide 
+        });
+        const maxPlane = new THREE.Mesh(planeGeo, planeMat);
+        maxPlane.position.z = maxZ;
+        scene.add(maxPlane);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(10, 10, 20);
+        scene.add(dirLight);
+
+        // 7. Raycaster
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        const markerGeo = new THREE.SphereGeometry(0.3, 16, 16);
+        const markerMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+        const marker = new THREE.Mesh(markerGeo, markerMat);
+        marker.visible = false;
+        scene.add(marker);
+
+        const onPointerMove = (event: PointerEvent) => {
+            if (!mountRef.current || !camera) return;
+            const rect = mountRef.current.getBoundingClientRect();
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObject(mesh);
+
+            if (intersects.length > 0) {
+                const intersect = intersects[0];
+                marker.position.copy(intersect.point);
+                marker.visible = true;
+                const z = intersect.point.z;
+                const norm = z / (10 * Z_SCALE);
+                const estTemp = data.min_temp + (norm * range);
+                setHoverInfo({ temp: estTemp, x: intersect.point.x, y: intersect.point.y });
+            } else {
+                marker.visible = false;
+                setHoverInfo(null);
+            }
+        };
+        
+        renderer.domElement.addEventListener('pointermove', onPointerMove);
+
+        const animate = () => {
+            animationId = requestAnimationFrame(animate);
+            if (controls) controls.update();
+            if (renderer && scene && camera) renderer.render(scene, camera);
+        };
+        animate();
+
+    } catch (err) {
+        console.error("Error inicializando Three.js", err);
     }
 
-    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    geometry.computeVertexNormals();
-
-    const material = new THREE.MeshStandardMaterial({ 
-        vertexColors: true, 
-        roughness: 0.5,
-        metalness: 0.1,
-        side: THREE.DoubleSide,
-        wireframe: false
-    });
-
-    const mesh = new THREE.Mesh(geometry, material);
-    scene.add(mesh);
-
-    // 6. Max Temp Plane (Reference)
-    const maxZ = 10 * Z_SCALE;
-    const planeGeo = new THREE.PlaneGeometry(data.width, data.height);
-    const planeMat = new THREE.MeshBasicMaterial({ 
-        color: 0xff0000, 
-        transparent: true, 
-        opacity: 0.1, 
-        side: THREE.DoubleSide 
-    });
-    const maxPlane = new THREE.Mesh(planeGeo, planeMat);
-    maxPlane.position.z = maxZ;
-    scene.add(maxPlane);
-
-    // Grid Helper at base
-    const gridHelper = new THREE.GridHelper(Math.max(data.width, data.height) * 1.5, 20, 0x334155, 0x1e293b);
-    gridHelper.rotation.x = Math.PI / 2;
-    gridHelper.position.z = -1;
-    scene.add(gridHelper);
-
-    // Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-    scene.add(ambientLight);
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    dirLight.position.set(10, 10, 20);
-    scene.add(dirLight);
-
-    // 7. Interaction (Raycaster)
-    const raycaster = new THREE.Raycaster();
-    const mouse = new THREE.Vector2();
-    const markerGeo = new THREE.SphereGeometry(0.3, 16, 16);
-    const markerMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-    const marker = new THREE.Mesh(markerGeo, markerMat);
-    marker.visible = false;
-    scene.add(marker);
-
-    const onPointerMove = (event: PointerEvent) => {
-        if (!mountRef.current) return;
-        const rect = mountRef.current.getBoundingClientRect();
-        mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-        mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-        raycaster.setFromCamera(mouse, camera);
-        const intersects = raycaster.intersectObject(mesh);
-
-        if (intersects.length > 0) {
-            const intersect = intersects[0];
-            marker.position.copy(intersect.point);
-            marker.visible = true;
-
-            // Reverse calc temp from Z
-            const z = intersect.point.z;
-            const norm = z / (10 * Z_SCALE);
-            const estTemp = data.min_temp + (norm * range);
-            
-            setHoverInfo({
-                temp: estTemp,
-                x: intersect.point.x,
-                y: intersect.point.y
-            });
-        } else {
-            marker.visible = false;
-            setHoverInfo(null);
-        }
-    };
-    
-    // Add event listeners specific to renderer canvas
-    renderer.domElement.addEventListener('pointermove', onPointerMove);
-    // Touch support for interaction is handled by OrbitControls primarily, 
-    // but tapping to see value could be added similarly.
-
-    // Animation Loop
-    let animationId: number;
-    const animate = () => {
-        animationId = requestAnimationFrame(animate);
-        controls.update();
-        renderer.render(scene, camera);
-    };
-    animate();
-
-    // Cleanup
     return () => {
-        cancelAnimationFrame(animationId);
-        renderer.domElement.removeEventListener('pointermove', onPointerMove);
-        mountRef.current?.removeChild(renderer.domElement);
-        geometry.dispose();
-        material.dispose();
-        renderer.dispose();
+        if (animationId) cancelAnimationFrame(animationId);
+        if (renderer) {
+            renderer.domElement.remove();
+            renderer.dispose();
+        }
     };
   }, [data]);
 
   return (
     <div className="relative w-full h-full group">
         <div ref={mountRef} className="w-full h-full cursor-move" />
-        
-        {/* Info Overlay */}
         <div className="absolute top-4 left-4 bg-slate-900/80 backdrop-blur p-2 rounded border border-slate-700 pointer-events-none">
             <p className="text-xs text-slate-400">Plano Rojo = Max Temp ({data.max_temp.toFixed(1)}°C)</p>
             <p className="text-xs text-slate-500 mt-1">Girar: Arrastrar | Zoom: Rueda</p>
         </div>
-
-        {/* Dynamic Tooltip */}
         {hoverInfo && (
             <div className="absolute bottom-4 right-4 bg-slate-800/90 border border-orange-500/50 p-3 rounded-lg shadow-xl animate-in fade-in slide-in-from-bottom-2">
                 <div className="flex items-center space-x-2">
@@ -196,32 +180,26 @@ const Thermal3DViewer: React.FC<{ data: ThermalFrameData }> = ({ data }) => {
 
 // --- COMPONENTE PRINCIPAL ---
 export const Analysis: React.FC = () => {
-  // File State
   const [files, setFiles] = useState<DataFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<DataFile | null>(null);
   const [evolutionData, setEvolutionData] = useState<EvolutionPoint[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   
-  // Matrix View State
   const [viewMode, setViewMode] = useState<'overview' | '2d' | '3d' | 'grayscale' | 'ai'>('overview');
   const [currentFrameIndex, setCurrentFrameIndex] = useState(0);
   const [matrixData, setMatrixData] = useState<ThermalFrameData | null>(null);
   const [matrixError, setMatrixError] = useState<string | null>(null);
   
-  // Refs for 2D Canvases
   const canvas2DRef = useRef<HTMLCanvasElement>(null);
   const canvasGrayRef = useRef<HTMLCanvasElement>(null);
 
-  // Gemini State
   const [aiAnalysis, setAiAnalysis] = useState<string>("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [apiKey, setApiKey] = useState<string | null>(null);
 
-  // Loading States
   const [loadingList, setLoadingList] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
 
-  // Initial Load
   useEffect(() => {
     const initData = async () => {
       setLoadingList(true);
@@ -244,7 +222,6 @@ export const Analysis: React.FC = () => {
     initData();
   }, []);
 
-  // Update Matrix Data
   useEffect(() => {
     if (selectedFile && (viewMode !== 'overview')) {
       const fetchMatrix = async () => {
@@ -276,7 +253,6 @@ export const Analysis: React.FC = () => {
             const val = pixels[i];
             const norm = (val - min_temp) / range;
             const idx = i * 4;
-            // Heatmap: Blue -> Red
             data[idx] = Math.min(255, Math.max(0, norm * 255 * 2));     
             data[idx + 1] = Math.min(255, Math.max(0, (norm - 0.5) * 255 * 2)); 
             data[idx + 2] = Math.min(255, Math.max(0, (1 - norm) * 255)); 
@@ -287,7 +263,7 @@ export const Analysis: React.FC = () => {
     }
   }, [matrixData, viewMode]);
 
-  // Draw Grayscale Heatmap (High Contrast)
+  // Draw Grayscale Heatmap
   useEffect(() => {
     if (viewMode === 'grayscale' && matrixData && canvasGrayRef.current) {
       const ctx = canvasGrayRef.current.getContext('2d');
@@ -302,12 +278,11 @@ export const Analysis: React.FC = () => {
             const val = pixels[i];
             const norm = (val - min_temp) / range;
             const idx = i * 4;
-            // Grayscale: 0 (Black) -> 255 (White)
             const gray = Math.floor(norm * 255);
-            data[idx] = gray;     // R
-            data[idx + 1] = gray; // G
-            data[idx + 2] = gray; // B
-            data[idx + 3] = 255;  // Alpha
+            data[idx] = gray;     
+            data[idx + 1] = gray; 
+            data[idx + 2] = gray; 
+            data[idx + 3] = 255;  
         }
         ctx.putImageData(imgData, 0, 0);
       }
