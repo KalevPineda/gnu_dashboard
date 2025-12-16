@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Save, Sliders, Power, RefreshCw, AlertCircle, Gauge, Key } from 'lucide-react';
+import { Save, Sliders, Power, RefreshCw, AlertCircle, Gauge, Key, Mail } from 'lucide-react';
 import { api } from '../services/api';
 import { RemoteConfig } from '../types';
 
@@ -140,25 +140,25 @@ export const Settings: React.FC = () => {
           </div>
         </div>
 
-        {/* API Keys Section */}
+        {/* Notification Settings (Restored) */}
         <div className="space-y-4">
           <h3 className="text-slate-100 font-medium flex items-center border-b border-slate-700 pb-2">
-            <Key className="w-4 h-4 mr-2 text-orange-500" />
-            Integraciones & API Keys
+            <Mail className="w-4 h-4 mr-2 text-orange-500" />
+            Notificaciones
           </h3>
           
           <div>
-              <label className="block text-sm font-medium text-slate-300 mb-1">Gemini AI API Key</label>
+              <label className="block text-sm font-medium text-slate-300 mb-1">Correo Electrónico de Alertas</label>
               <div className="relative">
                 <input 
-                  type="password" 
-                  placeholder="AIzaSy..."
-                  value={config.gemini_api_key || ''}
-                  onChange={(e) => setConfig({...config, gemini_api_key: e.target.value})}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-md py-2 px-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-500 font-mono text-sm"
+                  type="email" 
+                  placeholder="admin@empresa.com"
+                  value={config.alert_email || ''}
+                  onChange={(e) => setConfig({...config, alert_email: e.target.value})}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-md py-2 px-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
                 />
               </div>
-              <p className="text-xs text-slate-500 mt-1">Requerido para análisis inteligente de matrices térmicas.</p>
+              <p className="text-xs text-slate-500 mt-1">Dirección destino para reportes automáticos de anomalías térmicas.</p>
           </div>
         </div>
 

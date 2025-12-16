@@ -227,7 +227,6 @@ export const Analysis: React.FC = () => {
 
   const [aiAnalysis, setAiAnalysis] = useState<string>("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [apiKey, setApiKey] = useState<string | null>(null);
 
   const [loadingList, setLoadingList] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
@@ -241,10 +240,6 @@ export const Analysis: React.FC = () => {
         setFiles(captures);
         if (captures.length > 0) {
           handleSelectFile(captures[0]);
-        }
-        const configData = await api.getConfig();
-        if (configData.gemini_api_key) {
-          setApiKey(configData.gemini_api_key);
         }
       } catch (e) {
         console.error("Error fetching init data", e);
@@ -339,7 +334,7 @@ export const Analysis: React.FC = () => {
   };
 
   const runGeminiAnalysis = async () => {
-    if (!apiKey || !selectedFile) {
+    if (!process.env.API_KEY || !selectedFile) {
         setAiAnalysis("Error: API Key no configurada.");
         return;
     }
@@ -359,7 +354,7 @@ export const Analysis: React.FC = () => {
     setAiAnalysis("");
 
     try {
-        const ai = new GoogleGenAI({ apiKey: apiKey });
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const prompt = `Actúa como un ingeniero experto en análisis térmico.
         Analiza los siguientes datos de una captura térmica de turbina:
         ${promptContext}
@@ -556,18 +551,18 @@ export const Analysis: React.FC = () => {
                                 </div>
                             </div>
 
-                            {!apiKey && (
+                            {!process.env.API_KEY && (
                                 <div className="mb-4 p-3 bg-yellow-900/30 border border-yellow-700 rounded text-xs text-yellow-200 flex items-start">
                                     <AlertTriangle className="w-4 h-4 mr-2 flex-shrink-0" />
                                     <div>
-                                        API Key no configurada. Por favor ve a <Link to="/settings" className="underline hover:text-white">Configuración</Link>.
+                                        API Key no configurada. Verifique las variables de entorno.
                                     </div>
                                 </div>
                             )}
 
                             <button 
                                 onClick={runGeminiAnalysis}
-                                disabled={isAnalyzing || !apiKey}
+                                disabled={isAnalyzing || !process.env.API_KEY}
                                 className="w-full py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors flex justify-center items-center"
                             >
                                 {isAnalyzing ? <div className="animate-spin h-4 w-4 border-2 border-white rounded-full border-t-transparent mr-2"></div> : <Sparkles className="w-4 h-4 mr-2" />}
