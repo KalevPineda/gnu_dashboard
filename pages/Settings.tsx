@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Save, Sliders, Power, RefreshCw, AlertCircle, Mail } from 'lucide-react';
+import { Save, Sliders, Power, RefreshCw, AlertCircle, Gauge } from 'lucide-react';
 import { api } from '../services/api';
 import { RemoteConfig } from '../types';
 
@@ -8,6 +8,7 @@ export const Settings: React.FC = () => {
     max_temp_trigger: 0,
     scan_wait_time_sec: 0,
     system_enabled: false,
+    pan_step_degrees: 0.5, // Default
     alert_email: '',
   });
   const [loading, setLoading] = useState(true);
@@ -20,8 +21,12 @@ export const Settings: React.FC = () => {
 
   const loadConfig = async () => {
     setLoading(true);
-    const data = await api.getConfig();
-    setConfig(data);
+    try {
+      const data = await api.getConfig();
+      setConfig(data);
+    } catch (e) {
+      setMsg({ type: 'error', text: 'No se pudo cargar la configuración del servidor.' });
+    }
     setLoading(false);
   };
 
@@ -78,13 +83,13 @@ export const Settings: React.FC = () => {
         <div className="space-y-4">
           <h3 className="text-slate-100 font-medium flex items-center border-b border-slate-700 pb-2">
             <Sliders className="w-4 h-4 mr-2 text-orange-500" />
-            Parámetros
+            Parámetros de Escaneo
           </h3>
 
-          {/* Trigger Temp */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Trigger Temp */}
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-1">Disparador de Temp. Máx (°C)</label>
+              <label className="block text-sm font-medium text-slate-300 mb-1">Disparador de Temp. Máx</label>
               <div className="relative">
                 <input 
                   type="number" 
@@ -95,12 +100,12 @@ export const Settings: React.FC = () => {
                 />
                 <span className="absolute right-3 top-2 text-slate-500 text-sm">°C</span>
               </div>
-              <p className="text-xs text-slate-500 mt-1">Alertas activadas sobre este valor.</p>
+              <p className="text-xs text-slate-500 mt-1">Umbral para generar alertas.</p>
             </div>
 
             {/* Wait Time */}
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-1">Tiempo de Espera de Escaneo (seg)</label>
+              <label className="block text-sm font-medium text-slate-300 mb-1">Tiempo de Espera</label>
               <div className="relative">
                 <input 
                   type="number" 
@@ -110,26 +115,27 @@ export const Settings: React.FC = () => {
                 />
                 <span className="absolute right-3 top-2 text-slate-500 text-sm">seg</span>
               </div>
-              <p className="text-xs text-slate-500 mt-1">Duración de pausa entre ciclos.</p>
+              <p className="text-xs text-slate-500 mt-1">Pausa en los bordes del escaneo.</p>
             </div>
-          </div>
 
-          {/* Email Settings */}
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1">Correo de Alertas</label>
-            <div className="relative">
-               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Mail className="h-4 w-4 text-slate-500" />
-               </div>
-               <input 
-                  type="email" 
-                  value={config.alert_email}
-                  onChange={(e) => setConfig({...config, alert_email: e.target.value})}
+            {/* Pan Step Degrees (Nuevo) */}
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1">Velocidad Angular (Paso)</label>
+              <div className="relative">
+                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Gauge className="h-4 w-4 text-slate-500" />
+                 </div>
+                <input 
+                  type="number"
+                  step="0.1"
+                  value={config.pan_step_degrees}
+                  onChange={(e) => setConfig({...config, pan_step_degrees: parseFloat(e.target.value)})}
                   className="w-full bg-slate-950 border border-slate-700 rounded-md py-2 pl-10 pr-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  placeholder="admin@ejemplo.com"
-               />
+                />
+                <span className="absolute right-3 top-2 text-slate-500 text-sm">deg</span>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">Grados por paso del motor.</p>
             </div>
-            <p className="text-xs text-slate-500 mt-1">Destinatario de reportes de puntos calientes.</p>
           </div>
         </div>
 
@@ -140,7 +146,7 @@ export const Settings: React.FC = () => {
             onClick={loadConfig}
             className="flex items-center text-slate-400 hover:text-white text-sm"
           >
-            <RefreshCw className="w-4 h-4 mr-1" /> Reestablecer
+            <RefreshCw className="w-4 h-4 mr-1" /> Recargar
           </button>
 
           <button 
@@ -149,7 +155,7 @@ export const Settings: React.FC = () => {
             className="flex items-center bg-orange-600 hover:bg-orange-700 text-white py-2 px-6 rounded-md font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {saving ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div> : <Save className="w-4 h-4 mr-2" />}
-            Guardar Cambios
+            Guardar Configuración
           </button>
         </div>
 

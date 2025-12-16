@@ -3,7 +3,8 @@ export interface RemoteConfig {
     max_temp_trigger: number;
     scan_wait_time_sec: number;
     system_enabled: boolean;
-    alert_email: string;
+    pan_step_degrees: number; // Nuevo campo en el backend Rust
+    alert_email?: string; // Opcional o eliminado en el backend Rust provisto, lo dejo opcional para evitar errores de compilación si se usaba
   }
   
   // Matches Rust 'LiveStatus'
