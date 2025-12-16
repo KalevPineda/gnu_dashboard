@@ -28,13 +28,16 @@ const Thermal3DViewer: React.FC<{ data: ThermalFrameData }> = ({ data }) => {
         scene.background = new THREE.Color('#0f172a'); // Slate 950 matches UI
 
         // 2. Camera
-        camera = new THREE.PerspectiveCamera(45, mountRef.current.clientWidth / mountRef.current.clientHeight, 0.1, 1000);
-        camera.position.set(0, -data.height * 1.5, data.width); // Angled view
+        // Adjust FOV and position for better mobile view
+        const aspect = mountRef.current.clientWidth / mountRef.current.clientHeight;
+        camera = new THREE.PerspectiveCamera(50, aspect, 0.1, 1000);
+        camera.position.set(0, -data.height * 1.2, data.width * 0.8); 
         camera.up.set(0, 0, 1); // Z is up
 
         // 3. Renderer
         renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
         mountRef.current.innerHTML = '';
         mountRef.current.appendChild(renderer.domElement);
 
@@ -43,7 +46,9 @@ const Thermal3DViewer: React.FC<{ data: ThermalFrameData }> = ({ data }) => {
         controls.enableDamping = true;
         controls.dampingFactor = 0.05;
         controls.screenSpacePanning = false;
-        controls.maxPolarAngle = Math.PI / 2;
+        controls.maxPolarAngle = Math.PI / 2.2; // Don't go below ground
+        controls.minDistance = 5;
+        controls.maxDistance = 100;
 
         // 5. Geometry (Terrain)
         const geometry = new THREE.PlaneGeometry(data.width, data.height, data.width - 1, data.height - 1);
@@ -53,7 +58,7 @@ const Thermal3DViewer: React.FC<{ data: ThermalFrameData }> = ({ data }) => {
         const colors = [];
         const colorObj = new THREE.Color();
         const range = (data.max_temp - data.min_temp) || 1;
-        const Z_SCALE = 0.5;
+        const Z_SCALE = 0.4; // Slightly flatter
 
         for (let i = 0; i < count; i++) {
             const temp = data.pixels[i];
@@ -105,17 +110,17 @@ const Thermal3DViewer: React.FC<{ data: ThermalFrameData }> = ({ data }) => {
         // 7. Raycaster
         const raycaster = new THREE.Raycaster();
         const mouse = new THREE.Vector2();
-        const markerGeo = new THREE.SphereGeometry(0.3, 16, 16);
+        const markerGeo = new THREE.SphereGeometry(0.5, 16, 16);
         const markerMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
         const marker = new THREE.Mesh(markerGeo, markerMat);
         marker.visible = false;
         scene.add(marker);
 
-        const onPointerMove = (event: PointerEvent) => {
+        const updateRaycaster = (clientX: number, clientY: number) => {
             if (!mountRef.current || !camera) return;
             const rect = mountRef.current.getBoundingClientRect();
-            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
 
             raycaster.setFromCamera(mouse, camera);
             const intersects = raycaster.intersectObject(mesh);
@@ -133,8 +138,21 @@ const Thermal3DViewer: React.FC<{ data: ThermalFrameData }> = ({ data }) => {
                 setHoverInfo(null);
             }
         };
+
+        const onPointerMove = (event: PointerEvent) => {
+            updateRaycaster(event.clientX, event.clientY);
+        };
         
+        // Touch support for tapping/dragging
+        // We only update if it's a single touch to avoid conflict with zoom/rotate
+        const onTouchStart = (event: TouchEvent) => {
+             if (event.touches.length === 1) {
+                 updateRaycaster(event.touches[0].clientX, event.touches[0].clientY);
+             }
+        };
+
         renderer.domElement.addEventListener('pointermove', onPointerMove);
+        renderer.domElement.addEventListener('touchstart', onTouchStart); // Better mobile interaction
 
         const animate = () => {
             animationId = requestAnimationFrame(animate);
@@ -143,28 +161,42 @@ const Thermal3DViewer: React.FC<{ data: ThermalFrameData }> = ({ data }) => {
         };
         animate();
 
+        // Handle resize
+        const handleResize = () => {
+            if (!mountRef.current || !camera || !renderer) return;
+            const w = mountRef.current.clientWidth;
+            const h = mountRef.current.clientHeight;
+            camera.aspect = w / h;
+            camera.updateProjectionMatrix();
+            renderer.setSize(w, h);
+        };
+        window.addEventListener('resize', handleResize);
+
+        return () => {
+            window.removeEventListener('resize', handleResize);
+            if (animationId) cancelAnimationFrame(animationId);
+            if (renderer) {
+                renderer.domElement.removeEventListener('pointermove', onPointerMove);
+                renderer.domElement.removeEventListener('touchstart', onTouchStart);
+                renderer.domElement.remove();
+                renderer.dispose();
+            }
+        };
+
     } catch (err) {
         console.error("Error inicializando Three.js", err);
     }
-
-    return () => {
-        if (animationId) cancelAnimationFrame(animationId);
-        if (renderer) {
-            renderer.domElement.remove();
-            renderer.dispose();
-        }
-    };
   }, [data]);
 
   return (
-    <div className="relative w-full h-full group">
+    <div className="relative w-full h-full group touch-none"> {/* touch-none to prevent scroll while interacting */}
         <div ref={mountRef} className="w-full h-full cursor-move" />
         <div className="absolute top-4 left-4 bg-slate-900/80 backdrop-blur p-2 rounded border border-slate-700 pointer-events-none">
             <p className="text-xs text-slate-400">Plano Rojo = Max Temp ({data.max_temp.toFixed(1)}°C)</p>
-            <p className="text-xs text-slate-500 mt-1">Girar: Arrastrar | Zoom: Rueda</p>
+            <p className="text-[10px] text-slate-500 mt-1">Girar: Arrastrar | Zoom: Rueda/Pellizco</p>
         </div>
         {hoverInfo && (
-            <div className="absolute bottom-4 right-4 bg-slate-800/90 border border-orange-500/50 p-3 rounded-lg shadow-xl animate-in fade-in slide-in-from-bottom-2">
+            <div className="absolute bottom-4 right-4 bg-slate-800/90 border border-orange-500/50 p-3 rounded-lg shadow-xl animate-in fade-in slide-in-from-bottom-2 z-10 pointer-events-none">
                 <div className="flex items-center space-x-2">
                     <MousePointer2 className="w-4 h-4 text-orange-400" />
                     <span className="text-lg font-bold text-white">{hoverInfo.temp.toFixed(1)}°C</span>
