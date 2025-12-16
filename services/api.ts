@@ -45,23 +45,18 @@ export const api = {
   
   getAlerts: () => request<AlertRecord[]>('/alerts'),
   
-  // La API Rust devuelve un vector de puntos de evolución
   getEvolutionData: (filename: string) => request<EvolutionPoint[]>(`/evolution/${filename}`),
 
-  // NOTA: La API Rust actual NO tiene un endpoint "/matrix".
-  // Eliminamos el generador falso. Esto lanzará error en la UI si se intenta usar,
-  // lo cual es correcto para verificar la integración real.
   getThermalMatrix: async (datasetId: string, frameIndex: number): Promise<ThermalFrameData> => {
-    // Intentamos llamar a un endpoint hipotético o lanzamos error controlado
-    // para que la UI sepa que no hay datos de matriz disponibles.
     console.warn("La API actual no soporta streaming de matriz térmica (falta endpoint /matrix o /pixels).");
     throw new Error("Matrix Data Not Available in Backend");
   },
 
-  // NOTA: La API Rust actual sirve archivos estáticos en /files pero NO tiene un endpoint 
-  // que retorne un JSON con la lista de archivos. Retornamos array vacío para no romper la UI.
+  /**
+   * Obtiene la lista de archivos directamente del sistema de archivos del servidor.
+   * Requiere que el backend implemente la ruta GET /api/files.
+   */
   getFiles: async (): Promise<DataFile[]> => {
-     console.warn("La API actual no soporta listado de directorios.");
-     return [];
+     return await request<DataFile[]>('/files');
   }
 };
